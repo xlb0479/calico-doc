@@ -40,4 +40,38 @@ Calico的核心设计原则采用了云原生设计模式的最佳实践，结�
 
 ![img](https://projectcalico.docs.tigera.io/images/intro/interoperability.png)
 
-Calico可以让K8S应用、非K8S应用、或遗留系统进行无缝且安全的通信。在你的网路中，K8S的pod是一等公民，能够跟网络中的其他任意系统进行通信。而且Calico还能无缝的将你已有的基于主机的系统
+Calico可以让K8S应用、非K8S应用、或遗留系统进行无缝且安全的通信。在你的网路中，K8S的pod是一等公民，能够跟网络中的其他任意系统进行通信。而且Calico还能无缝地将它的安全能力扩展到你已有的和K8S协同的基于主机的系统（不管是在公有云、专有云、VM、还是裸金属服务器上）。所有的工作负载都会满足同样的网络策略模型，所以能出现的网络流量都是你所期待的流量。
+
+## 真实的生产环境应用
+
+![img](https://projectcalico.docs.tigera.io/images/intro/deployed.png)
+
+很多大企业，包括SaaS供应商、金融服务企业、以及制造商，都选择相信Calico并在生产环境中使用了Calico。最大的公有云提供商选择Calico来为他们的K8S服务（Amazon EKS、Azure AKS、Google GKE、IBM IKS）提供网络安全。
+
+## 完全支持K8S的网络策略
+
+![img](https://projectcalico.docs.tigera.io/images/intro/policy.png)
+
+在开发API的时候，Calico的网络策略引擎就实现了K8S的网络策略。Calico的卓越之处在于，这些API定义时所设想的那些功能以及灵活性，Calico全都把它们实现出来了。如果用户想要更多功能，Calico可以支持扩展的网络策略能力，可以无缝地跟K8S的API一起工作，甚至可以提供比用户定义的网络策略更好的灵活性。
+
+## 贡献者
+
+![img](https://projectcalico.docs.tigera.io/images/intro/community.png)
+
+Calico开源项目能有今天，离不开来自各个公司200+的贡献者。此外，Calico背靠Tigera，它是由最初的Calico工程师团队建立的，致力于保持Calico在K8S网络策略这块领先的标准地位。
+
+## Calico Cloud的兼容性
+
+Calico Cloud基于开源的Calico打造，提供以下K8S安全及可观察性的特性及能力：
+
+- Egress访问控制（DNS策略、egress网关）
+- 将防火墙扩展到K8S
+- 层次分级
+- 基于FQDN/DNS的策略
+- 在主机/VM/容器间的微分段（Micro-segmentation）
+- 合规报告与告警
+- K8S入侵检测与防御（IDS/IPS）
+- SIEM集成
+- 应用层（L7）可观测性
+- 动态数据包捕获
+- DNS面板
