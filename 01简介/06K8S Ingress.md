@@ -62,4 +62,18 @@ Ingress的具体实现依赖于你用的[Ingress Controller](https://kubernetes.
 
 上面的图关注的都是Ingress和Service连接（L5-7）的表现形式。可以在[K8S Service](05K8S%20Service.md)中学习到更多关于处理连接时涉及到的网络（L3-4）交互细节，包括什么时候能将客户端源IP保留下来。
 
-如果你已经准备好了解
+如果你已经准备好了解Service底层的工作细节了，这里有一些更详细的图，展示了Service在负载均衡时网络层（L3-4）上的细节。
+
+> 注意：即便不了解这个层面的知识你也可以使用Ingress把一切搞定！如果不想了解底层的这些知识，跳过就行了。
+
+**集群内Ingress方案，暴露成了`LocalBalancer`类型的Service，并且设置了`externalTrafficPolicy:local`**
+
+![img](https://projectcalico.docs.tigera.io/images/ingress-in-cluster-nlb-local.svg)
+
+**集群外Ingress方案，使用Node Port**
+
+![img](https://projectcalico.docs.tigera.io/images/ingress-external-node-ports.svg)
+
+**集群外Ingress方案，直达Pod**
+
+![img](https://projectcalico.docs.tigera.io/images/ingress-external-direct-to-pods.svg)
