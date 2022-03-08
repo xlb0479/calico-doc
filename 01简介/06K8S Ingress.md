@@ -49,3 +49,17 @@ Ingress的具体实现依赖于你用的[Ingress Controller](https://kubernetes.
 ### 外部Ingress
 
 外部Ingress的方案使用了集群外的应用负载均衡器。具体细节依赖于你选用的Ingress Controller，大部分云服务商都包含了一个Ingress Controller，可以自动提供并管理云服务商的应用负载均衡，提供Ingress。
+
+这种类型的优点在于，Ingress的复杂性交给云服务商了。缺点就是可能没有集群内Ingress方案那么多的特性，而且能够通过Ingress暴露出来的服务的数量也被云服务商限制住了。
+
+![img](https://projectcalico.docs.tigera.io/images/ingres-external.svg)
+
+注意了，大部分的应用负载均衡都支持基本的通过[Node Port](05K8S%20Service.md#Node%20port)的方式将流量转发都选中的后端Pod上。
+
+除了这种基本的Node Port的方式，一些云服务商还提供第二种应用层负载均衡的方法，可以直接在后端Pod上进行负载均衡，无需通过node-port或kube-proxy服务的处理。这种方式可以在对跨界点Pod负载均衡时消除二次网络hop。潜在的缺点就是如果你的规模特别大，比如一个Service后面几百个Pod，可能会超出应用层负载均衡可以操作的最大IP数量。此时换成集群内Ingress的方案可能更合适。
+
+## 深挖一下！
+
+上面的图关注的都是Ingress和Service连接（L5-7）的表现形式。可以在[K8S Service](05K8S%20Service.md)中学习到更多关于处理连接时涉及到的网络（L3-4）交互细节，包括什么时候能将客户端源IP保留下来。
+
+如果你已经准备好了解
