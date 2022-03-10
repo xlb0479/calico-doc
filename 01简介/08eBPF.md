@@ -46,3 +46,47 @@ bpf映射表的内容可以用命令行工具`bpftool`来查看，这个工具�
 
 ## Calico的eBPF数据面
 
+Calico的eBPF数据面是我们提供的标准Linux数据面（基于iptables）的一种替换方案。标准数据面的关注点是和kube-proxy以及你自己的iptables规则的兼容性，eBPF数据面关注的是性能、延迟，以及提升用户体验，带来标准数据面中不可能出现的特性。其中，eBPF数据面将kube-proxy换成eBPF实现。主要的“用户体验”提升点在于集群外流量打到NodePort时能够保留该流量的源IP；这样就让你服务端的日志和网络策略的可用性更加强了。
+
+### 特性比较
+
+虽然eBPF数据面具备一些标准Linux数据面没有的特性，但反过来也是成立的。
+
+|**要素**|**标准Linux数据面**|**eBPF数据面**
+|-|-|-|
+|吞吐量|为10GBit+设计|为40GBit+设计|
+|首包延迟|低（主要受kube-proxy服务的延迟影响）|更低|
+|后续包延迟|低|更低|
+|保留集群内源IP|是|是|
+|保留集群外源IP|必须设置`externalTrafficPolicy: Local`|是|
+|DSR|不支持|支持（需要兼容的底层网络）|
+|连接跟踪|Linux内核的conntrack表（大小可调）|BPF映射表（固定大小）|
+|策略规则|映射到iptables规则中|映射到BPF指令|
+|策略选择器|映射到IP集|映射到BPF映射表|
+|K8S服务|kube-proxy iptables或IPVS模式|BPF程序及映射表|
+|IPIP|支持|支持（由于内核限制没有性能优势）|
+|VXLAN|支持|支持|
+|Wireguard|支持|支持|
+|其它路由|支持|支持|
+|支持第三方CNI插件|是（必须兼容）|是（必须兼容）|
+|和其它iptables规则兼容|是（可以在其它规则之上或之下写入规则）|部分；为工作负载的流量绕过了iptables|
+|主机endpoint策略|支持|支持|
+|企业版|支持|支持|
+|XDP Dos防御|支持|支持|
+|IPv6|支持|不支持（尚未）|
+
+### 架构一览
+
+Calico的eBPF数据面将eBPF程序附加到每个Calico接口以及你的数据和隧道接口的`tc`钩子上。这样就可以让Calico更早的发现工作负载的数据包，通过快速通道进行处理，绕过iptables以及其它内核可能进行的数据包处理。
+
+![img](https://projectcalico.docs.tigera.io/images/bpf-pod-to-pod.svg)
+
+实现负载均衡和包解析的逻辑都提前预编译了，依赖一组BPF映射表保存NAT的前后端信息。一个映射表保存了Service的元数据，支持`externalTrafficPolicy`以及“粘性”Service。第二个映射表保存了后端Pod的IP。
+
+在eBPF模式中，Calico将你的策略转换成了优化后的eBPF字节码，用BPF映射表来保存匹配策略选择器的IP集合。
+
+![img](https://projectcalico.docs.tigera.io/images/bpf-policy.svg)
+
+为了提升Service的性能，Calico通过socket的BPF钩子，提供了连接时负载均衡。当一个程序尝试去连接K8S的一个Service，Calico拦截到这个连接尝试，对socket进行配置，让它直接连接到后端Pod的IP上。这样就在Service连接中拿掉了*所有的*NAT开销。
+
+![img](https://projectcalico.docs.tigera.io/images/bpf-connect-time.svg)
