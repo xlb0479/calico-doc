@@ -1,4 +1,10 @@
-# 一个小知识速查手册
+# Calico部署选项
+
+Calico灵活的模块化架构支持多种部署选项，这样你就可以选择最适合你环境的网络和网络策略选项。这就包括它可以跟各种不同的CNI、IPAM插件、底层网络选项一起运行的能力。
+
+在[快速开始](02安装Calico/01Kubernetes/01%E5%BF%AB%E9%80%9F%E5%BC%80%E5%A7%8B.md)中，默认使用了在每个环境中最常用的选项，这样你暂时就无需深入了解它们的细节。
+
+你可以在下面各个选项中了解更多细节。
 
 ## 策略
 
@@ -36,3 +42,27 @@ Overlay网路允许Pod间进行跨节点通信，而且底层网络无需感知P
 
 ### Calico路由
 
+Calico为Pod在节点间的流量进行路由分发和路由编程，用的是它的数据存储，无需BGP。Calico路由在单个子网内支持无封装流量，在多子网集群中也可以选择性的使用VXLAN封装。
+
+## 数据存储
+
+### kubernetes
+
+Calico将集群的操作和配置状态统一保存在一个中央的数据存储中。如果这个数据存储崩了，Calico网络依然能够保持正常，但是无法更新了（新的Pod没网，无法更新策略，等）。
+
+Calico有两种数据存储驱动供你选择：
+
+- etcd - 直接连接etcd集群
+- Kubernetes - 连接kubernetes的API server。
+
+用Kubernetes做数据存储的优势在于：
+
+- 不需要额外的数据存储，安装和管理都简单
+- 可以用Kubernetes的RBAC对Calico资源进行访问控制
+- 可以使用Kubernetes生成Calico资源变更的审计日志
+
+出于完整性，使用etcd作为数据存储的优势在于：
+
+- 可以在非Kubernetes平台运行Calico（比如OpenStack）
+- 分离Kubernetes和Calico的问题域，比如可以单独对数据存储进行扩缩
+- Calico集群中不光可以包含一个Kubernetes集群，比如在裸金属服务器上用Calico做主机防护，可以跟一个或多个Kubernetes集群进行交互。
