@@ -26,7 +26,7 @@
 
 了解规模化部署用到的Typha。
 
-## [安装calico/node](07安装calico/node.md)
+## [安装calico/node](07安装calico-node.md)
 
 以daemon set方式配置并安装calico/node。
 
