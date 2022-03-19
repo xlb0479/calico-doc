@@ -62,7 +62,7 @@ kubectl create serviceaccount -n kube-system calico-typha
 
 为Typha定义一个集群角色，带有对Calico数据存储对象的监视权限。
 
-```shell
+```yaml
 kubectl apply -f - <<EOF
 kind: ClusterRole
 apiVersion: rbac.authorization.k8s.io/v1
@@ -129,7 +129,7 @@ kubectl create clusterrolebinding calico-typha --clusterrole=calico-typha --serv
 
 因为`calico/node`需要Typha，而且`calico/node`建立了Pod网络，我们要将Typha作为一个主机网络Pod来运行，避免鸡生蛋蛋生鸡的问题。我们跑了3个Typha副本，这样即便在滚动更新的时候，一个单点故障不会导致Typha不可用。
 
-```shell
+```yaml
 kubectl apply -f - <<EOF
 apiVersion: apps/v1
 kind: Deployment
@@ -223,3 +223,78 @@ EOF
 
 我们把`TYPHA_CLIENTCN`设置成`calico-node`，跟下一个实验中`calico/node`要用的证书中的common name一致。
 
+检查Typha的三个实例都起来了没
+
+```shell
+kubectl get pods -l k8s-app=calico-typha -n kube-system
+```
+
+结果：
+
+```shell
+NAME                            READY   STATUS    RESTARTS   AGE
+calico-typha-66498ddfbd-2pzsr   1/1     Running   0          69s
+calico-typha-66498ddfbd-lrtzw   1/1     Running   0          50s
+calico-typha-66498ddfbd-scckd   1/1     Running   0          62s
+```
+
+## 安装Service
+
+`calico/node`使用一个Kubernetes Service来对Typha进行负载均衡。
+
+```yaml
+kubectl apply -f - <<EOF
+apiVersion: v1
+kind: Service
+metadata:
+  name: calico-typha
+  namespace: kube-system
+  labels:
+    k8s-app: calico-typha
+spec:
+  ports:
+    - port: 5473
+      protocol: TCP
+      targetPort: calico-typha
+      name: calico-typha
+  selector:
+    k8s-app: calico-typha
+EOF
+```
+
+确认Typha用了TLS。
+
+```shell
+TYPHA_CLUSTERIP=$(kubectl get svc -n kube-system calico-typha -o jsonpath='{.spec.clusterIP}')
+curl https://$TYPHA_CLUSTERIP:5473 -v --cacert typhaca.crt
+```
+
+结果
+```
+* Rebuilt URL to: https://10.103.120.116:5473/
+*   Trying 10.103.120.116...
+* TCP_NODELAY set
+* Connected to 10.103.120.116 (10.103.120.116) port 5473 (#0)
+* ALPN, offering h2
+* ALPN, offering http/1.1
+* successfully set certificate verify locations:
+*   CAfile: typhaca.crt
+  CApath: /etc/ssl/certs
+* (304) (OUT), TLS handshake, Client hello (1):
+* (304) (IN), TLS handshake, Server hello (2):
+* TLSv1.2 (IN), TLS handshake, Certificate (11):
+* TLSv1.2 (IN), TLS handshake, Server key exchange (12):
+* TLSv1.2 (IN), TLS handshake, Request CERT (13):
+* TLSv1.2 (IN), TLS handshake, Server finished (14):
+* TLSv1.2 (OUT), TLS handshake, Certificate (11):
+* TLSv1.2 (OUT), TLS handshake, Client key exchange (16):
+* TLSv1.2 (OUT), TLS change cipher, Client hello (1):
+* TLSv1.2 (OUT), TLS handshake, Finished (20):
+* TLSv1.2 (IN), TLS alert, Server hello (2):
+* error:14094412:SSL routines:ssl3_read_bytes:sslv3 alert bad certificate
+* stopped the pause stream!
+* Closing connection 0
+curl: (35) error:14094412:SSL routines:ssl3_read_bytes:sslv3 alert bad certificate
+```
+
+这样就说明Typha给出了它的TLS证书并拒绝了我们的连接，因为我们没有出示证书。下一个实验中我们会部署`calico/node`并带有Typha可接受的证书。
