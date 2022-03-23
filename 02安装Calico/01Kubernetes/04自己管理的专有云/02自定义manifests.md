@@ -98,4 +98,142 @@ curl https://projectcalico.docs.tigera.io/manifests/calico-etcd.yaml -O
 curl https://projectcalico.docs.tigera.io/manifests/canal.yaml -O
 ```
 
+2. 在`ConfigMap`中打开`etcd_ca`，`etcd_key`，`etcd_cert`的注释，然后如下。
+
+```yaml
+etcd_ca: "/calico-secrets/etcd-ca"
+etcd_cert: "/calico-secrets/etcd-cert"
+etcd_key: "/calico-secrets/etcd-key"
+```
+
+3. 确保上面要的三个文件你已经有了。
+
+4. 用下面的命令转base64并且去掉换行。
+
+```shell
+cat <file> | base64 -w 0
+```
+
+5. 在名为`calico-etcd-secrets`的`Secret`中，打开`etcd_ca`，`etcd_key`，`etcd_cert`的注释，然后把base64值复制粘贴到对应的值中。
+
+```yaml
+apiVersion: v1
+kind: Secret
+type: Opaque
+metadata:
+  name: calico-etcd-secrets
+  namespace: kube-system
+data:
+  # Populate the following files with etcd TLS configuration if desired, but leave blank if
+  # not using TLS for etcd.
+  # This self-hosted install expects three files with the following names.  The values
+  # should be base64 encoded strings of the entire contents of each file.
+  etcd-key: LS0tLS1CRUdJTiB...VZBVEUgS0VZLS0tLS0=
+  etcd-cert: LS0tLS1...ElGSUNBVEUtLS0tLQ==
+  etcd-ca: LS0tLS1CRUdJTiBD...JRklDQVRFLS0tLS0=
+```
+
+6. 应用manifest。
+
+**Calico策略和网络**
+
+```shell
+kubectl apply -f calico.yaml
+```
+
+**Calico策略和flannel网络**
+
+```shell
+kubectl apply -f canal.yaml
+```
+
+### 授权选项
+
+Calico的manifests会授予它的组件两个ServiceAccount中的一个。根据集群的授权模式，可能需要为这些ServiceAccount提供必要的权限。
+
+### 其他配置
+
+下表给出其他在`ConfigMap`中支持的选项。
+
+|**选项**|**描述**|**默认值**
+|-|-|-
+|calico_backend|使用的backend|`bird`
+|cni_network_config|每个节点上安装的CNI网络配置。支持下面讲的模板化功能。|
+
+### CNI网络配置模板
+
+`cni_network_config`配置选项支持下面的模板属性，它们会被`calico/cni`容器自动填入：
+
+|**属性**|**替换为**
+|-|-
+|`__KUBERNETES_SERVICE_HOST__`|Kubernetes Service Cluster IP，例如`10.0.0.1`
+|`__KUBERNETES_SERVICE_PORT__`|Kubernetes Service端口，例如`443`
+|`__SERVICEACCOUNT_TOKEN__`|该命名空间的ServiceAccount token，如果有的话。
+|`__ETCD_ENDPOINTS__`|`etcd_endpoints`中指定的etcd接入点。
+|`__KUBECONFIG_FILEPATH__`|跟CNI网络配置文件在同一目录下自动生成的kubeconfig文件。
+|`__ETCD_KEY_FILE__`|在节点上安装的etcd密钥文件。没有的话就留空。
+|`__ETCD_CERT_FILE__`|在节点上安装的etcd证书文件，没有的话就留空。
+|`__ETCD_CA_CERT_FILE__`|在节点上安装的etcd证书授权文件。没有的话就留空。
+
 ## 定制应用层策略manifests
+
+### 关于应用层策略manifests
+
+不用我们已经提前弄好的Istio manifests，定制自己的Istio安装或者装一个不同版本的Istio。这里我们要教你如何在一个普通的Istio manifests上通过必要的修改来实现应用层策略。
+
+### Sidecar注入器
+
+在标准的Istio manifests中，为sidecar注入器提供了一个ConfigMap，包含了添加Pod时要使用的模板。这个模板增加了一个初始化容器和一个Envoy sidecar。应用层策略需要一个额外的轻量级sidecar，名为Dikastes，它接收从Felix发过来的Calico策略，将它应用到进来的连接和请求上。
+
+如果你啥还没开始弄，先下载[Isitio](https://github.com/istio/istio/releases)并解压。
+
+在编辑器中打开`install/kubernetes/istio-demo-auth.yaml`文件，找到`istio-sidecar-injector`ConfigMap。在`istio-proxy`容器中，添加一个新的`volumeMount`。
+
+```yaml
+        - mountPath: /var/run/dikastes
+          name: dikastes-sock
+```
+
+在模板中添加一个新的容器。
+
+```yaml
+      - name: dikastes
+        image: calico/dikastes:v3.22.1
+        args: ["server", "-l", "/var/run/dikastes/dikastes.sock", "-d", "/var/run/felix/nodeagent/socket"]
+        securityContext:
+          allowPrivilegeEscalation: false
+        livenessProbe:
+          exec:
+            command:
+            - /healthz
+            - liveness
+          initialDelaySeconds: 3
+          periodSeconds: 3
+        readinessProbe:
+          exec:
+            command:
+            - /healthz
+            - readiness
+          initialDelaySeconds: 3
+          periodSeconds: 3
+        volumeMounts:
+        - mountPath: /var/run/dikastes
+          name: dikastes-sock
+        - mountPath: /var/run/felix
+          name: felix-sync
+```
+
+添加两个新的数据卷。
+
+```yaml
+      - name: dikastes-sock
+        emptyDir:
+          medium: Memory
+      - name: felix-sync
+        flexVolume:
+          driver: nodeagent/uds
+```
+
+你建的这些数据卷是用来创建Unix domain socket的，允许Dikastes和Envoy、Dikastes和Felix之间进行通信。创建之后，Unix domain socket就是一个位于内存中的通信渠道。这些数据卷不负责任何基于磁盘的有状态存储。
+
+参考[Calico ConfigMap manifest](https://projectcalico.docs.tigera.io/manifests/alp/istio-inject-configmap-1.4.2.yaml)，包含了以上修改的例子。
