@@ -25,7 +25,7 @@ Calico有两种数据存储驱动供你选择
 
 使用Kubernetes API数据存储驱动时，大部分Calico资源都保存为[Kubernetes自定义资源](https://kubernetes.io/docs/concepts/extend-kubernetes/api-extension/custom-resources/)。
 
-零星几个Calico资源没有保存为自定义资源，就是用原本的Kubernetes资源类型来实现的。比如[16WorkloadEndpoint](../../../06%E5%8F%82%E8%80%83/04资源定义/16WorkloadEndpoint.md)就是Kubernetes的Pod。
+零星几个Calico资源没有保存为自定义资源，就是用原本的Kubernetes资源类型来实现的。比如[WorkloadEndpoint](../../../06%E5%8F%82%E8%80%83/04资源定义/16WorkloadEndpoint.md)就是Kubernetes的Pod。
 
 为了用Kubernetes作为Calico的数据存储，我们要定义Calico用到的自定义资源。
 
