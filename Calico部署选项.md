@@ -58,7 +58,9 @@ BGP是用来构建因特网的一个基于标准的路由协议。它的伸缩�
 
 Calico可以用三种模式来运行BGP：
 
-- **Full mesh** - 每个节点都跟其它节点进行BGP交互，可轻松扩展至100个节点，
+- **Full mesh** - 每个节点都跟其它节点进行BGP交互，可轻松扩展至100个节点，基于底层L2网络或使用IPIP overlay。
+- **使用路由反射器** - 每个节点跟一个或多个BGP路由反射器通信，可扩展节点数超过100个，基于底层L2网络或使用IPIP overlay。
+- **与TOR（Top of Rack）路由对等** - 在一个物理的数据中心里，每个节点跟机架顶层的路由器通信，可扩展节点数量受限于物理数据中心的规模。
 
 ## 数据存储
 
@@ -82,3 +84,21 @@ Calico有两种数据存储驱动供你选择：
 - 可以在非Kubernetes平台运行Calico（比如OpenStack）
 - 分离Kubernetes和Calico的问题域，比如可以单独对数据存储进行扩缩
 - Calico集群中不光可以包含一个Kubernetes集群，比如在裸金属服务器上用Calico做主机防护，可以跟一个或多个Kubernetes集群进行交互。
+
+## 跨子网
+
+### VXLAN跨子网
+
+使用Calico的VXLAN跨子网模式，在同一个子网内的Pod流量不会使用overlay，在不同子网内的Pod流量则会使用VXLAN overlay。
+
+在同一个子网内的Pod数据包，无需overlay，得到最佳的网络性能。
+
+跨子网的Pod数据包使用IPIP封装，将每一个原始数据包用节点IP封装在一个外部数据包之内，将Pod IP隐藏在内部。Linux内核可以非常高效的完成这个事儿，但相对于非overlay流量来说仍然是存在一笔开销的。
+
+### IPIP跨子网
+
+使用Calico的IPIP跨子网模式，在同一个子网内的Pod流量不会使用overlay，在不同子网内的Pod流量则会使用IPIP overlay。
+
+在同一个子网内的Pod数据包，无需overlay，得到最佳的网络性能。
+
+跨子网的Pod数据包使用IPIP封装，将每一个原始数据包用节点IP封装在一个外部数据包之内，将Pod IP隐藏在内部。Linux内核可以非常高效的完成这个事儿，但相对于非overlay流量来说仍然是存在一笔开销的。
