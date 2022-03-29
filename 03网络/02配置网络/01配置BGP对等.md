@@ -62,8 +62,8 @@ Calico节点可以基于BGP交换路由信息，开启Calico网络中工作负�
 - [关闭默认BGP节点到节点的mesh](#关闭默认BGP节点到节点的mesh)
 - [不中断网络的情况下从节点到节点的mesh改成路由反射器模式](#不中断网络的情况下从节点到节点的mesh改成路由反射器模式)
 - [查看节点的BGP对等状态](#查看节点的BGP对等状态)
-- [修改默认的全局AS数量](#修改默认的全局AS数量)
-- [修改指定节点的AS数量](#修改指定节点的AS数量)
+- [修改默认的全局AS号](#修改默认的全局AS号)
+- [修改指定节点的AS号](#修改指定节点的AS号)
 
 ### 配置全局BGP对等
 
@@ -130,10 +130,58 @@ spec:
 
 ### 关闭默认BGP节点到节点的mesh
 
+可以关闭默认的**节点到节点BGP mesh**以便打造不同的BGP拓扑。需要修改默认的**BGP configuration**资源。执行下面的命令关闭BGP full-mesh：
+
+```shell
+calicoctl patch bgpconfiguration default -p '{"spec": {"nodeToNodeMeshEnabled": false}}'
+```
+
+> 注意：如果默认的BGP配置不存在那就得先创建一个。详见[BGP配置](../../06%E5%8F%82%E8%80%83/04资源定义/02BGP配置.md)。
+
+> 注意：关闭节点到节点的mesh会中断Pod网络，直到/或者用BGPPeer资源定义了可替代的BGP对等。为了避免Pod网络中断，可以在关闭节点到节点mesh之前先配置好BGPPeer资源。
+
 ### 不中断网络的情况下从节点到节点的mesh改成路由反射器模式
+
+从节点到节点mesh切换到BGP路由反射器模式会打断BGP会话并创建新的会话。对于集群中节点上的工作负载来说，这样做会导致短暂的数据面网络波动（2秒左右）。为了避免这个问题，在关闭节点到节点的mesh会话之前，可以先建好路由反射器节点并建立起BGP会话。
+
+需要按照下面说的步骤来：
+
+1. [创建新的节点作为路由反射器](#将一个节点配置成路由反射器)。这些节点[应当是不可调度的](https://kubernetes.io/docs/concepts/scheduling-eviction/taint-and-toleration/)，并且在节点定义中应当包含`routeReflectorClusterID`。它们不属于当前节点到节点的BGP mesh，当mesh关闭后会作为路由反射器。这些节点同时还应当有一个类似`route-reflector`这样的标签，便于在BGP对等时进行选择。[另一种方法是](https://kubernetes.io/docs/tasks/administer-cluster/safely-drain-node/)，可以选择集群中已存在的节点，执行`kubectl drain <NODE>`抽干上面的工作负载，然后把这些节点作为路由反射器，但这样做会导致这些被抽干的节点上的工作负载运行中断。
+2. 创建一个[BGPPeer](#将一个节点配置成路由反射器)定义，用标签选择器，为路由反射器和其它非路由反射器节点建立对等。
+3. 等待对等建立。可以在节点上执行`sudo calicoctl node status`[检查](#查看节点的BGP对等状态)对等状态。或者你可以创建一个[`CalicoNodeStatus`资源](../../06%E5%8F%82%E8%80%83/04资源定义/04Calico节点状态.md)来获取节点的BGP会话状态。
+4. [关闭节点到节点的BGP mesh](#关闭默认BGP节点到节点的mesh)。
+5. 如果你是将已有节点抽干，或者是创建新的节点并指定它们不可调度，此时需要将节点恢复可调度状态（执行`kubectl uncordon <NODE>`）。
 
 ### 查看节点的BGP对等状态
 
-### 修改默认的全局AS数量
+可以使用`calicoctl`查看指定节点的BGP连接状态。可以帮助你确认你的配置是否工作正常。
 
-### 修改指定节点的AS数量
+登录到你想检查的节点并执行下面的命令：
+
+```shell
+sudo calicoctl node status
+```
+
+输出了所有的邻居列表以及它们的当前状态。成功建立对等的会标记成**Established**。
+
+> 注意：该命令是跟本地的Calico agent通信，所以你必须登录到你想检查的节点上去执行这个命令。
+
+或者，你可以创建一个[`CalicoNodeStatus`资源](../../06%E5%8F%82%E8%80%83/04资源定义/04Calico节点状态.md)来获取节点的BGP会话状态。
+
+### 修改默认的全局AS号
+
+默认情况下所有的Calico节点都使用了64512自治系统，除非给节点指定了AS。可以为所有节点修改全局的默认值，修改默认的**BGPConfiguration**资源即可。下面的命令将全局默认的AS号改为**64513**。
+
+```shell
+calicoctl patch bgpconfiguration default -p '{"spec": {"asNumber": "64513"}}'
+```
+
+> 注意：如果这玩意儿不存在那就要先创建一个。详见[BGP配置](../../06%E5%8F%82%E8%80%83/04资源定义/02BGP配置.md)。
+
+### 修改指定节点的AS号
+
+可以修改特定节点的AS，使用`calicoctl`修改节点对象即可。比如下面的命令将名为**node-1**的节点修改成了**AS 64514**。
+
+```shell
+calicoctl patch node node-1 -p '{"spec": {"bgp": {"asNumber": "64514"}}}'
+```
