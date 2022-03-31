@@ -217,4 +217,4 @@ kubectl label node control-plane-01 node.kubernetes.io/exclude-from-external-loa
 
 ## 教程
 
-关于Calico的服务发布是如何工作的，这里有篇博文[Kubernetes Service IP路由发布](https://www.tigera.io/blog/kubernetes-service-ip-route-advertisement/)。
+关于Calico的服务发布是如何工作的，这里有篇博文[Kubernetes Service IP路由发布](/%E5%8D%9A%E6%96%87/Kubernetes%20Service%20IP路由发布.md)。
