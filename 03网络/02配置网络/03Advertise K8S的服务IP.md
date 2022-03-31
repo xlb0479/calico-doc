@@ -154,6 +154,67 @@ $ calicoctl get bgpconfig default
 
 3. 根据上面命令的执行结果，更新或创建BGPConfiguration。
 
-**更新默认的BGPConfiguration**
+**更新默认的BGPConfiguration** 用下面的命令给BGPConfiguration来个Patch，把负载均衡IP的CIDR加进去：
+
+```shell
+$ calicoctl patch BGPConfig default --patch '{"spec": {"serviceLoadBalancerIPs": [{"cidr": "x.x.x.x/16"}]}}'
+```
+
+**创建默认的BGPConfiguration** 用下面的例子创建一个默认的BGPConfiguration。把负载均衡IP的CIDR填到`serviceLoadBalancerIPs`属性中。
+
+```yaml
+$ calicoctl create -f - <<EOF
+apiVersion: projectcalico.org/v3
+kind: BGPConfiguration
+metadata:
+  name: default
+spec:
+  serviceLoadBalancerIPs:
+  - cidr: x.x.x.x/16
+EOF
+```
+
+详见[BGP配置资源](../../06%E5%8F%82%E8%80%83/04资源定义/02BGP配置.md)。
+
+关于Service的LoadBalancer地址分配超出了当前Calico的范围，但可以用外部控制器来实现。可以自己搞一个，也可以用第三方的实现，比如MetalLB。
+
+如果要安装MetalLB控制器来分配地址，按照下面的操作进行。
+
+1. 参考[MetalLB](https://metallb.universe.tf/installation/#installation-by-manifest)安装`metallb-system/controller`资源。
+
+但是不要安装`metallb-system/speaker`组件。speaker组件会在节点上建立BGP会话，跟Calico有冲突。
+
+2. 创建下面的ConfigMap配置MetalLB的地址分配，把`x.x.x.x/16`换成上面给Calico配的CIDR。
+
+```yaml
+kubectl create -f - <<EOF
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  namespace: metallb-system
+  name: config
+data:
+  config: |
+    address-pools:
+    - name: default
+      protocol: bgp
+      addresses:
+      - x.x.x.x/16
+EOF
+```
 
 ### 在发布中剔除某些节点
+
+有的时候需要在发布的服务地址中剔除某些节点。比如没有任何服务的控制面节点。
+
+要想剔除某个节点，打一个`node.kubernetes.io/exclude-from-external-load-balancers=true`标签即可。
+
+例如剔除`control-plane-01`节点：
+
+```shell
+kubectl label node control-plane-01 node.kubernetes.io/exclude-from-external-load-balancers=true
+```
+
+## 教程
+
+关于Calico的服务发布是如何工作的，这里有篇博文[Kubernetes Service IP路由发布](https://www.tigera.io/blog/kubernetes-service-ip-route-advertisement/)。
