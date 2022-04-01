@@ -61,7 +61,69 @@
 
 使用AKS的话，底层网络[MTU为1400](https://docs.microsoft.com/en-us/azure/virtual-network/virtual-network-tcpip-performance-tuning#azure-and-vm-mtu)，尽管网卡上的MTU可能是1500。WireGuard会设置数据包中的不允许分片（DF）位，所以在AKS中为了避免底层网络丢弃数据包，WireGuard的MTU应当设置成比1400再小60字节。
 
+如果你的集群中混用了WireGuard和IP in IP或VXLAN，那么应该将MTU设置成所有类型的最小值。这其中的缘由是，只有两端都开启了WireGuard时才会使用WireGuard的封装，只有两端都没有启用WireGuard的时候才会使用IP in IP或VXLAN封装。这种情况可能发生在你正在给节点安装WireGuard的时候。（不过真是，听着就乱。）
+
+因此我们给出以下建议：
+
+- 如果Pod网络中的任意位置使用了WireGuard，那就将MTU设置成“物理网络MTU减60”。
+- 如果没用WireGuard，但是Pod网络中有地方用了VXLAN，那就将MTU设置成“物理网络MTU减50”。
+- 如果没用WireGuard，但只使用了IP in IP，MTU设置成“物理网络MTU减20”
+- 将工作负载端MTU和隧道MTU设置成一样的（这样所有路径上的MTU就都一样了）
+
+#### eBPF模式
+
+NodePort实现时使用VXLAN隧道在节点间发送数据包，因此要拿VXLAN的MTU来设置工作负载（veth）的MTU，并且应当是“物理网络MTU减50”（同上）。
+
+#### flannel网络的MTU
+
+如果使用了flannel网络，网卡MTU应当和flannel接口的MTU匹配。
+
+- 如果使用了flannel的VXLAN，此时的通用设置参照上面表格中的“Calico MTU，VXLAN（IPv4）”列。
 
 ### 配置MTU
 
+> 注意：为Calico更新了MTU只会影响到新的工作负载。
+
+选择适当的方式来配置MTU。根据安装方法的不同则有所差异：
+
+- 基于Manifest的安装（如果你没看快速入门，那么大部分非OpenShift安装都属于这种类型）
+- Operator
+
+#### Manifest
+
+如果是基于manifest的安装（没用operator），需要编辑`calico-config`ConfigMap。例如：
+
+```shell
+$ kubectl patch configmap/calico-config -n kube-system --type merge \
+  -p '{"data":{"veth_mtu": "1440"}}'
+```
+
+更新之后，给所有calico/node来一次滚动重启。例如：
+
+```shell
+$ kubectl rollout restart daemonset calico-node -n kube-system
+```
+
+#### Operator
+
+如果是Operator安装，编辑Calico operator的`Installation`资源，设置`spec`的`calicoNetwork`中的`mtu`字段。例如：
+
+```shell
+$ kubectl patch installation.operator.tigera.io default --type merge -p '{"spec":{"calicoNetwork":{"mtu":1440}}}'
+```
+
+类似的，OpenShift：
+
+```shell
+$ oc patch installation.operator.tigera.io default --type merge -p '{"spec":{"calicoNetwork":{"mtu":1440}}}'
+```
+
 ### 查看当前隧道MTU值
+
+使用下面的命令查看当前隧道大小：
+
+`ip link show`
+
+IP in IP隧道作为tunlx出现（例如tunl0），后面有MTU的大小。例如：
+
+![img](https://projectcalico.docs.tigera.io/images/tunnel.png)
