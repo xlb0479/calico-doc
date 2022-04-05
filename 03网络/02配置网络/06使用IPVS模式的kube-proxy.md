@@ -18,4 +18,6 @@
 
 ### Kubernetes kube-proxy
 
-Kube-proxy处理每个节点上跟Service相关的所有的事儿。它要保证到服务集群IP和端口的连接能够指到对应的Pod上。
+Kube-proxy处理每个节点上跟Service相关的所有的事儿。它要保证到服务集群IP和端口的连接能够指到对应的Pod上。如果有多个Pod，kube-proxy负载在这些Pod之间进行负载均衡。
+
+Kube-proxy有三种模式：**userspace**、**iptables**、**ipvs**。（Userspace很老了，不建议用。）这里快速介绍下iptables和ipvs模式。
