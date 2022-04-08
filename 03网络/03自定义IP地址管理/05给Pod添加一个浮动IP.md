@@ -82,3 +82,13 @@ cni_network_config: |-
 ```
 
 ### 给Pod配置一个浮动IP
+
+给Pod加一个注解`cni.projectcalico.org/floatingIPs`，值是用方括号括起来的IP地址列表。为了保证在集群内做出正确的广播，所有的浮动IP必须落在配置的[IP池](../../06%E5%8F%82%E8%80%83/04%E8%B5%84%E6%BA%90%E5%AE%9A%E4%B9%89/09IP%E6%B1%A0.md)范围内。
+
+例如：
+
+```yaml
+"cni.projectcalico.org/floatingIPs": "[\"10.0.0.1\"]"
+```
+
+注意内部双引号要使用`\"`去义。
