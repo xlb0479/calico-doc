@@ -110,10 +110,156 @@ Kubernetes网络策略规范定义了以下行为：
 
 ### 控制命名空间中端点的出入流量
 
+下面的例子中，放行了**namespace: production**中带有**color: red**标签的端点的入口流量，当且仅当流量来自同一命名空间下带**color: blue**标签的Pod，并且目标端口为**6379**。
+
+```yaml
+apiVersion: projectcalico.org/v3
+kind: NetworkPolicy
+metadata:
+  name: allow-tcp-6379
+  namespace: production
+spec:
+  selector: color == 'red'
+  ingress:
+  - action: Allow
+    protocol: TCP
+    source:
+      selector: color == 'blue'
+    destination:
+      ports:
+        - 6379
+```
+
+如果要允许其它命名空间过来的流量，就要在策略规则中使用**namespaceSelector**。namespaceSelector根据命名空间的标签进行选择。下面的例子中，如果来源命名空间能够匹配**shape == circle**，则放行对应流量。
+
+```yaml
+apiVersion: projectcalico.org/v3
+kind: NetworkPolicy
+metadata:
+  name: allow-tcp-6379
+  namespace: production
+spec:
+  selector: color == 'red'
+  ingress:
+  - action: Allow
+    protocol: TCP
+    source:
+      selector: color == 'blue'
+      namespaceSelector: shape == 'circle'
+    destination:
+      ports:
+      - 6379
+```
+
 ### 控制端点的出入流量，不管命名空间
+
+下面的例子跟上面的差不多，但是用了**kind: GlobalNetworkPolicy**，所以它不参照命名空间，应用在所有的端点上。
+
+下面的例子中，如果流量来自标签为**color: blue**的Pod，目标是标签为**color: red**的Pod，则拒绝所有的TCP流量。
+
+```yaml
+apiVersion: projectcalico.org/v3
+kind: GlobalNetworkPolicy
+metadata:
+  name: deny-blue
+spec:
+  selector: color == 'red'
+  ingress:
+  - action: Deny
+    protocol: TCP
+    source:
+      selector: color == 'blue'
+```
+
+类似**kind: NetworkPolicy**，你可以在策略规则中用namespaceSelector来允许或拒绝来自指定命名空间中的流量：
+
+```yaml
+apiVersion: projectcalico.org/v3
+kind: GlobalNetworkPolicy
+metadata:
+  name: deny-circle-blue
+spec:
+  selector: color == 'red'
+  ingress:
+  - action: Deny
+    protocol: TCP
+    source:
+      selector: color == 'blue'
+      namespaceSelector: shape == 'circle'
+```
 
 ### 使用IP地址或CIDR控制端点的出入流量
 
+除了用选择器来定义流量规则，还可以用CIDR来声明。
+
+这个例子中，如果出口流量是来自带有标签**color: red**的Pod，并且目标IP落在**1.2.3.4/24**中，那么就放行这些流量。
+
+```yaml
+apiVersion: projectcalico.org/v3
+kind: NetworkPolicy
+metadata:
+  name: allow-egress-external
+  namespace: production
+spec:
+  selector:
+    color == 'red'
+  types:
+    - Egress
+  egress:    
+    - action: Deny
+      destination:
+        nets:
+        - 1.2.3.0/24
+```
+
 ### 按序指定网络策略
 
+如果要控制网络策略使用的顺序，可以使用**order**字段（值越小优先级越高）。如果**action: allow**和**action: deny**可能施加到同样的端点上，那么此时定义策略的**order**就显得尤为重要了。
+
+在下面的例子中，**allow-cluster-internal-ingress**策略（order: 10）在**drop-other-ingress**策略（order: 20）之前执行。
+
+```yaml
+apiVersion: projectcalico.org/v3
+kind: GlobalNetworkPolicy
+metadata:
+  name: drop-other-ingress
+spec:
+  order: 20
+  ...deny policy rules here...
+```
+
+```yaml
+apiVersion: projectcalico.org/v3
+kind: GlobalNetworkPolicy
+metadata:
+  name: allow-cluster-internal-ingress
+spec:
+  order: 10
+  ...allow policy rules here...
+```
+
 ### 为特定流量生成日志
+
+下面的例子中，拒绝了应用的入口TCP流量，并且在syslog中记录了每次连接尝试。
+
+```yaml
+apiVersion: projectcalico.org/v3
+kind: NetworkPolicy
+Metadata:
+  name: allow-tcp-6379
+  namespace: production
+Spec:
+  selector: role == 'database'
+  types:
+  - Ingress
+  - Egress
+  ingress:
+  - action: Log
+    protocol: TCP
+    source:
+      selector: role == 'frontend'
+  - action: Deny
+    protocol: TCP
+    source:
+      selector: role == 'frontend'
+```
