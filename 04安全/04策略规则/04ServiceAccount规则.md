@@ -33,4 +33,83 @@ ServiceAccount的操作是由RBAC控制的，所以你可以只为授信实体�
 
 ### ServiceAccount标签
 
-类似于其它的Kubernetes对象，ServiceAccount也有标签。
+类似于其它的Kubernetes对象，ServiceAccount也有标签。可以用标签为ServiceAccount创建“分组”。Calico网络策略可以用以下方式根据ServiceAccount匹配工作负载：
+
+- 精确匹配ServiceAccount的名字
+- ServiceAccount的标签选择器表达式
+
+## 开始之前……
+
+为应用配置一个唯一的Kubernetes ServiceAccount。
+
+## 怎么弄
+
+- [用ServiceAccount名限制工作负载的ingress流量](#用ServiceAccount名限制工作负载的ingress流量)
+- [用ServiceAccount标签限制工作负载的ingress流量](#用ServiceAccount标签限制工作负载的ingress流量)
+- [用Kubernetes RBAC控制ServiceAccount标签分配](#用Kubernetes%20RBAC控制ServiceAccount标签分配)
+
+### 用ServiceAccount名限制工作负载的ingress流量
+
+下面的例子中，如果ingress流量的来源ServiceAccount名为**api-service**或**user-auth-service**，那么就放行。
+
+```yaml
+apiVersion: projectcalico.org/v3
+kind: NetworkPolicy
+metadata:
+  name: demo-calico
+  namespace: prod-engineering
+spec:
+  ingress:
+    - action: Allow
+      source:
+        serviceAccounts:
+          names:
+            - api-service
+            - user-auth-service
+  selector: 'app == "db"'
+```
+
+### 用ServiceAccount标签限制工作负载的ingress流量
+
+下面的例子中，如果ingress流量的来源ServiceAccount匹配标签选择器**app == web-frontend**，那么就放行。
+
+```yaml
+apiVersion: projectcalico.org/v3
+kind: NetworkPolicy
+metadata:
+  name: allow-web-frontend
+  namespace: prod-engineering
+spec:
+  ingress:
+    - action: Allow
+      source:
+        serviceAccounts:
+          selector: 'app == "web-frontend"'
+  selector: 'app == "db"'
+```
+
+### 用Kubernetes RBAC控制ServiceAccount标签分配
+
+网络策略可以根据端点、命名空间、ServiceAccount的标签进行选择。如果时根据ServiceAccount，你可以用Kubernetes RBAC控制谁可以给ServiceAccount打标签。这样就可以将部署Pod和给ServiceAccount打标签的人分开。
+
+下面的例子中，具有内部ServiceAccount的Pod只可以跟带有`role: intern`标签的ServiceAccount进行通信。
+
+```yaml
+apiVersion: projectcalico.org/v3
+kind: NetworkPolicy
+metadata:
+  name: restrict-intern-access
+  namespace: prod-engineering
+spec:
+  serviceAccountSelector: 'role == "intern"'
+  ingress:
+    - action: Allow
+      source:
+        serviceAccounts:
+          selector: 'role == "intern"'
+  egress:
+    - action: Allow
+      destination:
+        serviceAccounts:
+          selector: 'role == "intern"'
+```
