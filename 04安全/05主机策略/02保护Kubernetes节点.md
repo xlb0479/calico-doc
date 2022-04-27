@@ -96,3 +96,94 @@ $ kubectl label node node1 environment=dev
 $ kubectl label node node2 environment=dev
 ```
 
+打好标签之后，并且开启了自动化主机端点，那么node1和node2的主机端点就会自动加上**environment=dev**标签。我们可以组合一下选择方式，只选择这部分节点：
+
+```yaml
+apiVersion: projectcalico.org/v3
+kind: GlobalNetworkPolicy
+metadata:
+  name: some-nodes-policy
+spec:
+  selector: has(kubernetes-host) && environment == 'dev'
+  <rest of the policy>
+```
+
+## 教程
+
+这里我们会拒掉Kubernetes节点的ingress流量，只允许SSH以及一些Kubernetes必需的端口。我们要创建两个策略：一个给master节点，一个给工作节点。
+
+> 注意：这里我们的测试集群是在AWS上面用kubeadm v1.18.2创建的，使用了“stacked etcd”模式的[拓扑](https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/ha-topology/)。这种拓扑就是说etcd的Pod运行在master节点上。kubeadm默认都是用这种模式安装的。<br/>如果你的Kubernetes集群用的是不一样的平台，比如是Kubernetes的某种衍生品，或者是使用了外部的etcd集群，那么需要审查master和worker节点需要的端口，根据需要调整你的策略。
+
+首先，我们限制master节点的ingress流量。下面给出的ingress策略包含了三条规则。第一条是允许从其它任意位置访问API server的端口。第二条是允许所有连接localhost的流量，也就是允许Kubernetes访问其控制面进程。这些控制面进程包括etcd服务器客户端API、调度器、以及controller-manager。这条规则还同时允许访问本地的kubelet API和calico/node安全检查。最后一条规则是允许etcd Pod之间建立对等，并且允许master互相访问各自的kubelet API。
+
+如果你没有改过安全失败（failsafe）端口，那么执行该策略后应该依然可以正常SSH连接到这些节点上。现在我们为Kubernetes的master节点执行下这个策略：
+
+```yaml
+calicoctl apply -f - << EOF
+apiVersion: projectcalico.org/v3
+kind: GlobalNetworkPolicy
+metadata:
+  name: ingress-k8s-masters
+spec:
+  selector: has(node-role.kubernetes.io/master)
+  # This rule allows ingress to the Kubernetes API server.
+  ingress:
+  - action: Allow
+    protocol: TCP
+    destination:
+      ports:
+      # kube API server
+      - 6443
+  # This rule allows all traffic to localhost.
+  - action: Allow
+    destination:
+      nets:
+      - 127.0.0.0/8
+  # This rule is required in multi-master clusters where etcd pods are colocated with the masters.
+  # Allow the etcd pods on the masters to communicate with each other. 2380 is the etcd peer port.
+  # This rule also allows the masters to access the kubelet API on other masters (including itself).
+  - action: Allow
+    protocol: TCP
+    source:
+      selector: has(node-role.kubernetes.io/master)
+    destination:
+      ports:
+      - 2380
+      - 10250
+EOF
+```
+
+注意上面的策略选择的是标准的**node-role.kubernetes.io/master**标签，是kubeadm给master节点打的。
+
+下一步，我们需要设置工作节点的策略。在创建策略之前我们先给所有工作节点打个标签，然后它会更新到自动化主机端点上。这里我们使用**kubernetes-worker**。示例命令如下：
+
+```shell
+$ kubectl get node -l '!node-role.kubernetes.io/master' -o custom-columns=NAME:.metadata.name | tail -n +2 | xargs -I{} kubectl label node {} kubernetes-worker=
+```
+
+这个策略有两条规则。第一条放行所有对localhost的访问。和master一样，工作节点也需要访问它们localhost上的kubelet API和calico/node健康检查。第二条规则是允许master访问工作节点的kubelet API。开搞：
+
+```yaml
+calicoctl apply -f - << EOF
+apiVersion: projectcalico.org/v3
+kind: GlobalNetworkPolicy
+metadata:
+  name: ingress-k8s-workers
+spec:
+  selector: has(kubernetes-worker)
+  # Allow all traffic to localhost.
+  ingress:
+  - action: Allow
+    destination:
+      nets:
+      - 127.0.0.0/8
+  # Allow only the masters access to the nodes kubelet API.
+  - action: Allow
+    protocol: TCP
+    source:
+      selector: has(node-role.kubernetes.io/master)
+    destination:
+      ports:
+      - 10250
+EOF
+```
