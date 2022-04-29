@@ -61,6 +61,68 @@ spec:
 
 ### 允许本地的egress流量
 
+我们还需要一个全局网络策略，用于放行流经每个节点外部接口的egress流量。否则，当我们给这些接口定义了主机端点之后，本地进程的egress流量就会被拒掉（除了[安全失败规则](../../06%E5%8F%82%E8%80%83/13%E4%B8%BB%E6%9C%BA%E7%AB%AF%E7%82%B9/05%E5%AE%89%E5%85%A8%E5%A4%B1%E8%B4%A5%E8%A7%84%E5%88%99.md)放行的流量）。
+
+```yaml
+apiVersion: projectcalico.org/v3
+kind: GlobalNetworkPolicy
+metadata:
+  name: allow-outbound-external
+spec:
+  order: 10
+  egress:
+    - action: Allow
+  selector: has(kubernetes-host)
+```
+
 ### 创建主机端点及适当的网络策略
 
+此时我们假设你已经定义了Calico主机端点，以及适当的网络策略。（比如你并不希望主机端点的网络策略是“默认拒绝所有出入主机的流量”，因为这样就不是你要的特定流量管控策略。）参见[主机端点](../../06%E5%8F%82%E8%80%83/04%E8%B5%84%E6%BA%90%E5%AE%9A%E4%B9%89/08%E4%B8%BB%E6%9C%BA%E7%AB%AF%E7%82%B9.md)。
+
+上面定义的所有全局网络策略，它们的选择器都会选中任何带有**kubernetes-host标签**的端点；因此我们要在定义中加上它。例如**node1**的**eth0**。
+
+```yaml
+apiVersion: projectcalico.org/v3
+kind: HostEndpoint
+metadata:
+  name: node1-eth0
+  labels:
+    kubernetes-host: ingress
+spec:
+  interfaceName: eth0
+  node: node1
+  expectedIPs:
+  - INSERT_IP_HERE
+```
+
+创建每一个主机端点时，需要把`INSERT_IP_HERE`替换成eth0上的IP地址。`expectedIPs`是必填项，这样ingress或egress规则中的选择器才能正确的匹配到主机端点上。
+
 ### 放行特定节点端口的ingress流量
+
+现在我们可以创建一个全局网络策略，设置preDNAT，允许外部访问节点端口。本例中，主机端点上**port: 31852**的**ingress流量都会被放行**。
+
+```yaml
+apiVersion: projectcalico.org/v3
+kind: GlobalNetworkPolicy
+metadata:
+  name: allow-nodeport
+spec:
+  preDNAT: true
+  applyOnForward: true
+  order: 10
+  ingress:
+    - action: Allow
+      protocol: TCP
+      destination:
+        selector: has(kubernetes-host)
+        ports: [31852]
+  selector: has(kubernetes-host)
+```
+
+如果只想让部分节点的**NodePort**可访问，那么给这些节点加一个特殊的标签。例如：
+
+```yaml
+nodeport-external-ingress: true
+```
+
+然后在**allow-nodeport**策略中去掉**has(kubernetes-host)**，使用**nodeport-external-ingress: true**作为选择器。
