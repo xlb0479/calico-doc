@@ -101,12 +101,87 @@ a. 在`$FAKEROOT/etc/kvc/wireguard-kmod.conf`中必须为`KERNEL_CORE_RPM`、`KE
 
 b. 关于`kvc-wireguard-kmod/wireguard-kmod.conf`的详细配置，见[kvc-wireguard-kmod的README](https://github.com/tigera/kvc-wireguard-kmod#quick-config-variables-guide)。注意里面同时给出了WireGuard版本和内核版本的兼容性。
 
-4. 
+4. 选择集群中的一个主机，在RHEL8系统上获取Entitlement数据。
+
+```shell
+$ tar -czf subs.tar.gz /etc/pki/entitlement/ /etc/rhsm/ /etc/yum.repos.d/redhat.repo
+```
+
+关于这个东西详见Openshift的[文档](https://access.redhat.com/documentation/en-us/red_hat_subscription_management/1/html-single/rhsm/index#reg-cli)。
+
+5. 将`subs.tar.gz`复制到你的工作空间中，然后使用下面的命令解压。
+
+```shell
+$ tar -x -C ${FAKEROOT}/root -f subs.tar.gz
+```
+
+6. 用[CoreOS Butane](https://coreos.github.io/butane/getting-started/)对机器配置进行transpile。
+
+```shell
+$ cd kvc-wireguard-kmod
+$ make ignition FAKEROOT=${FAKEROOT} > mc-wg.yaml
+```
+
+7. 当你配好KUBECONFIG之后，执行下面的命令应用MachineConfig，就会在集群中安装WireGuard。
 
 ### 启用WireGuard
 
+> 注意：如果节点不支持WireGuard那就不会得到WireGuard隧道加固，即便该节点上出入流量的另一端支持WireGuard也不行。
+
+执行下面的命令在所有节点上启用WireGuard加密。
+
+```shell
+$ calicoctl patch felixconfiguration default --type='merge' -p '{"spec":{"wireguardEnabled":true}}'
+```
+
+对于OpenShift则需要在自定义资源中添加Felix配置。
+
+> 注意：上面的命令也可以用于修改其他的WireGuard属性。完整的WireGuard参数和配置见[Felix配置](../06%E5%8F%82%E8%80%83/04%E8%B5%84%E6%BA%90%E5%AE%9A%E4%B9%89/05Felix%E9%85%8D%E7%BD%AE.md#Felix配置定义)。
+
+我们建议，如果启用了WireGuard，为了提升网络性能，最好检查并调整一下Calico使用的MTU。根据[配置MTU提升网络性能](../03%E7%BD%91%E7%BB%9C/02%E9%85%8D%E7%BD%AE%E7%BD%91%E7%BB%9C/04%E9%85%8D%E7%BD%AEMTU%E6%8F%90%E5%8D%87%E7%BD%91%E7%BB%9C%E6%80%A7%E8%83%BD.md)中的指示，为你的网络设置合适的MTU值。
+
 ### 关闭特定节点的WireGuard
+
+如果需要关闭指定节点上的WireGuard，需要修改该节点的Felix配置。例如可以使用下面的命令关闭`my-node`节点上的Pod流量加密：
+
+```yaml
+$ cat <<EOF | kubectl apply -f -
+apiVersion: projectcalico.org/v3
+kind: FelixConfiguration
+metadata:
+  name: node.my-node
+spec:
+  logSeverityScreen: Info
+  reportingInterval: 0s
+  wireguardEnabled: false
+EOF
+```
+
+执行上面的命令后，Calico就不再为`my-node`节点上出入的流量做加密了。
+
+如果要再次开启：
+
+```shell
+$ calicoctl patch felixconfiguration node.my-node --type='merge' -p '{"spec":{"wireguardEnabled":true}}'
+```
 
 ### 验证配置
 
+如果要确认节点是否已经配置了WireGuard加密，需要使用`calicoctl`工具检查节点状态。例如：
+
+```yaml
+$ calicoctl get node <NODE-NAME> -o yaml
+   ...
+   status:
+     ...
+     wireguardPublicKey: jlkVyQYooZYzI2wFfNhSZez5eWh44yfq1wKVjLvSXgY=
+     ...
+```
+
 ### 关闭WireGuard
+
+关闭所有节点上的WireGuard需要修改默认的Felix配置。例如：
+
+```shell
+$ calicoctl patch felixconfiguration default --type='merge' -p '{"spec":{"wireguardEnabled":false}}'
+```
