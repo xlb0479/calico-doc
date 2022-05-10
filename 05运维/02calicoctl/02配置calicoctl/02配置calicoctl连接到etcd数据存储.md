@@ -22,3 +22,112 @@
 > - 所有环境变量都可以加`CALICO_`前缀，比如`CALICO_DATASTORE_TYPE`和`CALICO_ETCD_ENDPOINTS`等都可以使用。如果你的环境变量名出现了冲突，有前缀的帮忙的话就会很方便了。
 > - `etcdCACert`、`etcdCert`、`etcdKey`没有对应的环境变量。
 > - 老版本的`calicoctl`支持`ETCD_SCHEME`和`ETCD_AUTHORITY`环境变量，作为指定etcd地址的一种机制。这些环境变量现在都不能用了。都用`ETCD_ENDPOINTS`。
+
+## 例子
+
+### 配置文件示例
+
+```yaml
+apiVersion: projectcalico.org/v3
+kind: CalicoAPIConfig
+metadata:
+spec:
+  etcdEndpoints: https://etcd1:2379,https://etcd2:2379,https://etcd3:2379
+  etcdKeyFile: /etc/calico/key.pem
+  etcdCertFile: /etc/calico/cert.pem
+  etcdCACertFile: /etc/calico/ca.pem
+```
+
+### 内联CA证书、客户端证书及密钥
+
+```yaml
+apiVersion: projectcalico.org/v3
+kind: CalicoAPIConfig
+metadata:
+spec:
+  datastoreType: etcdv3
+  etcdEndpoints: "https://127.0.0.1:2379"
+  etcdCACert: |
+      -----BEGIN CERTIFICATE-----
+      MIICKzCCAZSgAwIBAgIBAzANBgkqhkiG9w0BAQQFADA3MQswCQYDVQQGEwJVUzER
+      MA8GA1UEChMITmV0c2NhcGUxFTATBgNVBAsTDFN1cHJpeWEncyBDQTAeFw05NzEw
+      MTgwMTM2MjVaFw05OTEwMTgwMTM2MjVaMEgxCzAJBgNVBAYTAlVTMREwDwYDVQQK
+      EwhOZXRzY2FwZTENMAsGA1UECxMEUHViczEXMBUGA==
+      -----END CERTIFICATE-----
+  etcdCert: |
+      -----BEGIN CERTIFICATE-----
+      gI6iLXgMsp2EOlD56I6FA1jrCtNb01XQvX3eyFuA6g5T1jWGYBDtvQb0WRVkdUy9
+      L/uK+sHQwtloCSuakcQAsWV9bajCQtHX8XGu25Yz56kpJ/OJjcishxT6pc/sthum
+      A5PX739JsNUi/p5aG+H/6eNx+ukJP7QaM646YCfS5i8S9DJUvim+/BSlKi2ZiOCd
+      0MYH4Xb7lmAOTNmTvSYpKo9J2fZ9erw0MYSBTyjh6F7PRbHBiivgUnJfGQ==
+      -----END CERTIFICATE-----
+  etcdKey: |
+      -----BEGIN RSA PRIVATE KEY-----
+      k0dWj16h9P6TvfcNl2iwT4VIwx0uy2faWBED1DrCJcuQCy5nPrts2ZIaAWPi1t3t
+      VbDKQvs+KXBEeqh0qYcYkejUXqIF0uKUFLjiQmZssjpL5RHqqWuYKbO87n+Jod1L
+      TjGRHdbP0zF2U0LdjM17rc2hpJ3qrmgJ7pOLzbXMcOr+NP1ojRCArXhQ4iLs7D8T
+      eHw9QH4luJYtnmk7x03izLMQdLWcKnUbqh/xOVPyazgJHXwRxwNXpMsBVGY=
+      -----END RSA PRIVATE KEY-----
+```
+
+### 使用环境变量
+
+```shell
+$ ETCD_ENDPOINTS=http://myhost1:2379 calicoctl get bgppeers
+```
+
+### 使用etcd的DNS发现
+
+```shell
+$ ETCD_DISCOVERY_SRV=example.com calicoctl get nodes
+```
+
+### IPv6
+
+创建一个单节点etcd集群，监听在IPv6的localhost`[::1]`。
+
+```shell
+$ etcd --listen-client-urls=http://[::1]:2379 --advertise-client-urls=http://[::1]:2379
+```
+
+连接：
+
+```shell
+$ ETCD_ENDPOINTS=http://[::1]:2379 calicoctl get bgppeers
+```
+
+### IPv4/IPv6混用
+
+创建一个单节点etcd集群，监听在IPv4和IPv6的localhost`[::1]`。
+
+```shell
+$ etcd --listen-client-urls=http://[::1]:2379,http://127.0.0.1:2379 --advertise-client-urls=http://[::1]:2379
+```
+
+连接到IPv6：
+
+```shell
+$ ETCD_ENDPOINTS=http://[::1]:2379 calicoctl get bgppeers
+```
+
+连接到IPv4：
+
+```shell
+$ ETCD_ENDPOINTS=http://127.0.0.1:2379 calicoctl get bgppeers
+```
+
+## calico/node
+
+需要注意的是，calicoctl不光是直接在主机上使用这些key来访问etcd，**它还会传递环境变量，挂载key到`calico-node`容器中。**
+
+因此，执行`calicoctl node run`时只要参数正确，配置`calico/node`非常简单。
+
+### 检查配置
+
+检查安装和配置是否正确。
+
+```shell
+$ calicoctl get nodes
+```
+
+如果安装正确，会得到一个已注册的节点列表。如果返回的列表为空，那么你要么是连错数据存储了，要么是节点都没有注册上。如果返回报错，那么就针对问题进行修改然后再试一试。
