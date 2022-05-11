@@ -68,3 +68,32 @@ calicoctl datastore migrate unlock
 ```
 
 > 注意：当Kubernetes数据存储解锁后，数据存储迁移过程无法回滚。确保Kubernetes数据存储中已经得到了所有期望的Calico资源，然后再解锁。
+
+### 回滚
+
+回滚只有在原etcd数据库还在，并且导入到Kubernetes数据存储后还未解锁之前，才能进行回滚。下面的操作删除了导入到Kubernetes数据存储中的Calico资源，并将集群改回etcd模式。
+
+1. 锁定Kubernetes数据存储。
+
+```shell
+calicoctl datastore migrate lock
+```
+
+2. 删除所有的Calico CRD。该操作会删除所有导入到Kubernetes数据存储中的数据。
+
+```shell
+kubectl delete $(kubectl get crds -o name | grep projectcalico.org)
+```
+
+3. 把Calico改成etcd模式。参照基于etcd安装Calico的说明。安装指引中包含了`calico.yaml`文件相关的版本。
+
+```shell
+kubectl apply -f calico.yaml
+```
+
+4. 配置`calicoctl`连接到[etcd数据存储](02calicoctl/02%E9%85%8D%E7%BD%AEcalicoctl/02%E9%85%8D%E7%BD%AEcalicoctl%E8%BF%9E%E6%8E%A5%E5%88%B0etcd%E6%95%B0%E6%8D%AE%E5%AD%98%E5%82%A8.md)。
+5. 解锁etcd数据存储。这会让Calico资源重新接管集群。
+
+```shell
+calicoctl datastore migrate unlock
+```
