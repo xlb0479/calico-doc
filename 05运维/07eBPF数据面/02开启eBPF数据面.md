@@ -147,11 +147,192 @@ systemctl enable sys-fs-bpf.mount
 
 ### 让Calico直接连接API服务
 
+在eBPF模式中，Calico直接实现了Kubernetes服务的网络（不依赖`kube-proxy`）。就是说Calico需要跟`kube-proxy`一样*直接*连接到Kubernetes的API服务，而不能用API服务的ClusterIP。
+
+首先，记一下API服务的地址：
+
+- 如果是一个单节点API服务，而且是静态IP，那么可以直接使用这个IP地址和端口。可以通过以下命令看到IP：
+
+```shell
+$ kubectl get endpoints kubernetes -o wide
+```
+
+输出结果如下，在“ENDPOINTS”下面会看到IP地址和端口：
+
+```text
+NAME         ENDPOINTS             AGE
+kubernetes   172.16.101.157:6443   40m
+```
+
+如果存在多条记录，那么你的集群肯定是有多个API服务。此时需要用到下面说的负载均衡方法。
+- 如果用DNS负载均衡（`kops`就这么用的），那么就要使用API服务的FQDN和端口`api.internal.<clustername>`。
+- 如果多个API服务前面有负载均衡，可以使用负载均衡的IP和端口。
+
+> 如果你的集群使用ConfigMap来管理`kube-proxy`的配置，你可以通过检查该配置了解到如何“正确地”连接到API服务。例如：
+> ```shell
+> $ kubectl get configmap -n kube-system kube-proxy -o yaml | grep server`
+>    server: https://d881b853ae312e00302a84f1e346a77.gr7.us-west-2.eks.amazonaws.com
+> ```
+> 这里，服务地址就是`d881b853ae312e00302a84f1e346a77.gr7.us-west-2.eks.amazonaws.com`，端口是443（标准HTTPS端口）。
+
+**下面的操作依赖于你是用operator还是manifest安装的Calico：**
+
+#### Operator
+
+如果用operator装的，需要在`tigera-operator`命名空间中创建下面的ConfigMap，使用上面得到的地址和端口：
+
+```yaml
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: kubernetes-services-endpoint
+  namespace: tigera-operator
+data:
+  KUBERNETES_SERVICE_HOST: "<API server host>"
+  KUBERNETES_SERVICE_PORT: "<API server port>"
+```
+
+等个60秒，等kubelet同步`ConfigMap`（见Kubernetes的[issue #30189](https://github.com/kubernetes/kubernetes/issues/30189)）；然后重启operator，让新的配置生效：
+
+```shell
+kubectl delete pod -n tigera-operator -l k8s-app=tigera-operator
+```
+
+operator紧接着会对Calico做一次滚动更新，将配置变更传递进去。使用下面的命令确认Pod重启完成并进入`Running`状态：
+
+```shell
+watch kubectl get pods -n calico-system
+```
+
+如果你发现Pod没有重启，可能是`ConfigMap`还没生效（由于上面提到的问题，有的时候Kubernete同步`ConfigMap`比较慢）。可以尝试再次重启operator。
+
+#### Manifest
+
+如果是用manifest装的，需要在`kube-system`命名空间中创建下面的ConfigMap，使用上面得到的地址和端口：
+
+```yaml
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: kubernetes-services-endpoint
+  namespace: kube-system
+data:
+  KUBERNETES_SERVICE_HOST: "<API server host>"
+  KUBERNETES_SERVICE_PORT: "<API server port>"
+```
+
+等个60秒，等kubelet同步`ConfigMap`（见Kubernetes的[issue #30189](https://github.com/kubernetes/kubernetes/issues/30189)）；然后重启Calico的Pod，让新的配置生效：
+
+```shell
+kubectl delete pod -n kube-system -l k8s-app=calico-node
+kubectl delete pod -n kube-system -l k8s-app=calico-kube-controllers
+```
+
+如果还装了Typha：
+
+```shell
+kubectl delete pod -n kube-system -l k8s-app=calico-typha
+```
+
+使用下面的命令确认Pod重启完成并进入`Running`状态：
+
+```shell
+watch "kubectl get pods -n kube-system | grep calico"
+```
+
+可以通过其中一个calico/node的日志看看变更有没有生效。
+
+```shell
+kubectl get po -n kube-system -l k8s-app=calico-node
+```
+
+得到一个或多个Pod：
+
+```text
+NAME                                       READY   STATUS    RESTARTS   AGE
+calico-node-d6znw                          1/1     Running   0          48m
+...
+```
+
+然后查看日志，选择其中一个Pod并执行：
+
+```shell
+kubectl logs -n kube-system <pod name> | grep KUBERNETES_SERVICE_HOST
+```
+
+然后应该会看到以下日志，其中包含了正确的`KUBERNETES_SERVICE_...`值。
+
+```log
+2020-08-26 12:26:29.025 [INFO][7] daemon.go 182: Kubernetes server override env vars. KUBERNETES_SERVICE_HOST="172.16.101.157" KUBERNETES_SERVICE_PORT="6443"
+```
+
 ### 配置kube-proxy
+
+eBPF模式中Calico替代了`kube-proxy`，所以两个都还跑着就有点浪费了。这里我们教你常见环境中如何关掉`kube-proxy`。
+
+#### 用`DaemonSet`跑的`kube-proxy`（例如`kubeadm`）
+
+如果集群使用`DaemonSet`来运行`kube-proxy`（比如用`kubeadm`建的集群），可以将`kube-proxy`的`DaemonSet`的选择器改一下，让它匹配不到任何节点，安全地关掉`kube-proxy`，例如：
+
+```shell
+kubectl patch ds -n kube-system kube-proxy -p '{"spec":{"template":{"spec":{"nodeSelector":{"non-calico": "true"}}}}}'
+```
+
+后面如果你还想用`kube-proxy`，把那个选择器删掉就行了。
+
+如果你不想关掉`kube-proxy`（比如它是被你的Kubernetes发行版捆绑的），那么你*必须*将Felix配置中的`BPFKubeProxyIptablesCleanupEnabled`参数改成`false`。可以通过`calicoctl`执行：
+
+```shell
+calicoctl patch felixconfiguration default --patch='{"spec": {"bpfKubeProxyIptablesCleanupEnabled": false}}'
+```
+
+如果`kube-proxy`启用的同时还开着`BPFKubeProxyIptablesCleanupEnabled`，那么当`kube-proxy`把iptables规则写好后Felix就会尝试清理这些规则，导致iptables抽抽了。
+
+#### OpenShift
+
+如果你是OpenShift，可以这样关掉`kube-proxy`：
+
+```shell
+kubectl patch networks.operator.openshift.io cluster --type merge -p '{"spec":{"deployKubeProxy": false}}'
+```
+
+想重新启用的话：
+
+```shell
+kubectl patch networks.operator.openshift.io cluster --type merge -p '{"spec":{"deployKubeProxy": true}}'
+```
 
 ### 配置数据接口
 
+如果你节点的接口跟默认的正则`^(en.*|eth.*|tunl0$)`不匹配，必须修改felix的配置让它能探测到你的接口，把`bpfDataIfacePattern`改成适当的正则。
+
+```shell
+calicoctl patch felixconfiguration default --patch='{"spec": {"bpfDataIfacePattern": "<Regular expression>"}}'
+```
+
 ### 开启eBPF
+
+**下面的操作取决于你是用operator还是用manifest装的Calico：**
+
+#### Operator
+
+如果是operator，将operator的`Installation`资源中的`spec.calicoNetwork.linuxDataplane`参数改成`"BPF"`；而且必须删掉`hostPorts`，因为BPF模式下不支持主机端口：
+
+```shell
+$ kubectl patch installation.operator.tigera.io default --type merge -p '{"spec":{"calicoNetwork":{"linuxDataplane":"BPF", "hostPorts":null}}}'
+```
+
+> 注意：在operator进行滚动更新的过程中，有的节点会先于其它节点进入eBPF模式。此时会导致通过节点端口的流量中断。我们准备在即将发布的版本中改善这个问题，让operator做两阶段更新。
+
+#### Manifest
+
+如果是用manifest装的，将Felix配置中的`BPFEnabled`改成`true`。可以使用`calicoctl`执行：
+
+```shell
+calicoctl patch felixconfiguration default --patch='{"spec": {"bpfEnabled": true}}'
+```
+
+启用eBPF模式不会中断已有连接，但是已有连接会继续使用标准Linux数据路径。你可能需要重启Pod让新的连接进来，用上eBPF数据面。
 
 ### 尝试DSR模式
 
