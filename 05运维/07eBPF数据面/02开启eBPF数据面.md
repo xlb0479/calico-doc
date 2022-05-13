@@ -336,4 +336,42 @@ calicoctl patch felixconfiguration default --patch='{"spec": {"bpfEnabled": true
 
 ### 尝试DSR模式
 
+对于从集群外进到Service的流量（比如节点端口），直接返回模式（DSR）可以跳过一次hop。这样可以减少延迟及CPU开销，但是需要底层网络允许节点使用其它IP来发送流量。在AWS中，这需要你所有的节点都在同一个子网中，关闭源/目的地检查机制。
+
+DSR模式是关掉的；开启的话只需将Felix配置中的`BPFExternalServiceMode`改成`"DSR"`即可。可以通过`calicoctl`执行：
+
+```shell
+calicoctl patch felixconfiguration default --patch='{"spec": {"bpfExternalServiceMode": "DSR"}}'
+```
+
+如果要改回隧道模式，那就再改成`"Tunnel"`：
+
+```shell
+calicoctl patch felixconfiguration default --patch='{"spec": {"bpfExternalServiceMode": "Tunnel"}}'
+```
+
+这种模式切换会导致正在进行中的连接中断。
+
 ### 回滚
+
+如果要改回标准Linux网络：
+
+1. （看你是用operator还是manifest）回滚operator的`Installation`或`FelixConfiguration`资源：
+
+```shell
+$ kubectl patch installation.operator.tigera.io default --type merge -p '{"spec":{"calicoNetwork":{"linuxDataplane":"Iptables"}}}'
+```
+
+或：
+
+```shell
+calicoctl patch felixconfiguration default --patch='{"spec": {"bpfEnabled": false}}'
+```
+
+2. 如果关了`kube-proxy`，重新打开它（比如按照上面讲的删掉那个节点选择器）。
+
+```shell
+kubectl patch ds -n kube-system kube-proxy --type merge -p '{"spec":{"template":{"spec":{"nodeSelector":{"non-calico": null}}}}}'
+```
+
+3. 监控你的工作负载，确保由于切换过程中断的连接已经重新建立起来了。
