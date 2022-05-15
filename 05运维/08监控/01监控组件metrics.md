@@ -223,6 +223,61 @@ EOF
 
 > 注意：关于配置文件的详细介绍可以在[这里](https://prometheus.io/docs/prometheus/latest/configuration/configuration/)找到。
 
+##### Operator
+
+```yaml
+$ kubectl apply -f - <<EOF
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: calico-monitoring
+data:
+  prometheus.yml: |-
+    global:
+      scrape_interval:   15s
+      external_labels:
+        monitor: 'tutorial-monitor'
+    scrape_configs:
+    - job_name: 'prometheus'
+      scrape_interval: 5s
+      static_configs:
+      - targets: ['localhost:9090']
+    - job_name: 'felix_metrics'
+      scrape_interval: 5s
+      scheme: http
+      kubernetes_sd_configs:
+      - role: endpoints
+      relabel_configs:
+      - source_labels: [__meta_kubernetes_service_name]
+        regex: felix-metrics-svc
+        replacement: $1
+        action: keep
+    - job_name: 'typha_metrics'
+      scrape_interval: 5s
+      scheme: http
+      kubernetes_sd_configs:
+      - role: endpoints
+      relabel_configs:
+      - source_labels: [__meta_kubernetes_service_name]
+        regex: typha-metrics-svc
+        replacement: $1
+        action: keep
+    - job_name: 'kube_controllers_metrics'
+      scrape_interval: 5s
+      scheme: http
+      kubernetes_sd_configs:
+      - role: endpoints
+      relabel_configs:
+      - source_labels: [__meta_kubernetes_service_name]
+        regex: kube-controllers-metrics-svc
+        replacement: $1
+        action: keep
+EOF
+```
+
+##### Manifest
+
 ```yaml
 $ kubectl apply -f - <<EOF
 apiVersion: v1
